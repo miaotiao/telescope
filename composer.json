@@ -1,5 +1,5 @@
 {
-    "name": "miantiao/telescope",
+    "name": "miaotiao/telescope",
     "description": "An elegant debug assistant for the Laravel framework.For test.",
     "keywords": ["laravel", "monitoring", "debugging"],
     "license": "MIT",
