@@ -1,6 +1,6 @@
 {
-    "name": "laravel/telescope",
-    "description": "An elegant debug assistant for the Laravel framework.",
+    "name": "miantiao/telescope",
+    "description": "An elegant debug assistant for the Laravel framework.For test.",
     "keywords": ["laravel", "monitoring", "debugging"],
     "license": "MIT",
     "authors": [
