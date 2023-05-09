@@ -3,6 +3,8 @@
 namespace Laravel\Telescope\Storage;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Laravel\Telescope\Contracts\ClearableRepository;
@@ -11,6 +13,7 @@ use Laravel\Telescope\Contracts\PrunableRepository;
 use Laravel\Telescope\Contracts\TerminableRepository;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\EntryType;
+use Laravel\Telescope\EntryUpdate;
 use Laravel\Telescope\IncomingEntry;
 
 class DatabaseEntriesRepository implements Contract, ClearableRepository, PrunableRepository, TerminableRepository
@@ -111,7 +114,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
     /**
      * Counts the occurences of an exception.
      *
-     * @param  \Laravel\Telescope\IncomingEntry  $exception
+     * @param IncomingEntry $exception
      * @return int
      */
     protected function countExceptionOccurences(IncomingEntry $exception)
@@ -125,7 +128,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
     /**
      * Store the given array of entries.
      *
-     * @param  \Illuminate\Support\Collection|\Laravel\Telescope\IncomingEntry[]  $entries
+     * @param  \Illuminate\Support\Collection|IncomingEntry[] $entries
      * @return void
      */
     public function store(Collection $entries)
@@ -154,7 +157,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
     /**
      * Store the given array of exception entries.
      *
-     * @param  \Illuminate\Support\Collection|\Laravel\Telescope\IncomingEntry[]  $exceptions
+     * @param  \Illuminate\Support\Collection|IncomingEntry[] $exceptions
      * @return void
      */
     protected function storeExceptions(Collection $exceptions)
@@ -203,7 +206,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
     /**
      * Store the given entry updates.
      *
-     * @param  \Illuminate\Support\Collection|\Laravel\Telescope\EntryUpdate[]  $updates
+     * @param  \Illuminate\Support\Collection|EntryUpdate[]  $updates
      * @return void
      */
     public function update(Collection $updates)
@@ -233,9 +236,9 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
         }
 
         if (!empty($failUpdates)) {
-            cache()->lock('telescope-jobs-locks', 5)->block(60,function () use ($failUpdates) {
-                $data = cache('telescope-failUpdates', []);
-                cache(['telescope-failUpdates' => array_merge($data, $failUpdates)], 86400);
+            $this->handleWhileBlocking(function () use ($failUpdates) {
+                $data = cache('telescope:failUpdates', []);
+                cache(['telescope:failUpdates' => array_merge($data, $failUpdates)], 86400);
             });
         }
     }
@@ -243,20 +246,19 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
     /**
      * return update failed entries.
      *
-     * @param \Laravel\Telescope\IncomingEntry[] $entries
-     * @return \Laravel\Telescope\EntryUpdate[]  $updates
+     * @param IncomingEntry[] $entries
+     * @return EntryUpdate[]  $updates
      */
-    public function getFailedEntries(array $entries)
+    public function getFailedEntries(array $entries):array
     {
         if (empty($entries)) return [];
 
         $uuids = collect($entries)->pluck('uuid')->all();
 
-        return cache()->lock('telescope-jobs-locks', 5)->block(60,function () use ($uuids) {
-
+        return $this->handleWhileBlocking(function () use ($uuids) {
             $updates = [];
 
-            $data = cache('telescope-failUpdates');
+            $data = cache('telescope:failUpdates');
             if (empty($data)) return $updates;
 
             $newData = [];
@@ -267,15 +269,37 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
                     $newData[$uuid] = $item;
                 }
             }
-            cache(['telescope-failUpdates' => $newData], 86400);
+            cache(['telescope:failUpdates' => $newData], 86400);
             return $updates;
-        });
+        },[]);
+    }
+
+    /**
+     * @param callable $callback
+     * @param mixed|null $default
+     * @return callable|mixed|null
+     */
+    protected function handleWhileBlocking(callable $callback, mixed $default = null): mixed
+    {
+        $lock = cache()->lock('telescope:jobs-locks', 5)
+            ->betweenBlockedAttemptsSleepFor(15);
+
+        try {
+            $lock->block(60);
+
+            return $callback;
+        } catch (LockTimeoutException $e) {
+            app(ExceptionHandler::class)->report($e);
+            return $default;
+        } finally {
+            $lock?->release();
+        }
     }
 
     /**
      * Update tags of the given entry.
      *
-     * @param  \Laravel\Telescope\EntryUpdate  $entry
+     * @param  EntryUpdate  $entry
      * @return void
      */
     protected function updateTags($entry)
