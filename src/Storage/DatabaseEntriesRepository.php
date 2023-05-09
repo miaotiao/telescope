@@ -233,7 +233,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
         }
 
         if (!empty($failUpdates)) {
-            cache()->lock('telescope-jobs-locks', 5)->get(function () use ($failUpdates) {
+            cache()->lock('telescope-jobs-locks', 5)->block(60,function () use ($failUpdates) {
                 $data = cache('telescope-failUpdates', []);
                 cache(['telescope-failUpdates' => array_merge($data, $failUpdates)], 86400);
             });
@@ -252,7 +252,7 @@ class DatabaseEntriesRepository implements Contract, ClearableRepository, Prunab
 
         $uuids = collect($entries)->pluck('uuid')->all();
 
-        return cache()->lock('telescope-jobs-locks', 5)->get(function () use ($uuids) {
+        return cache()->lock('telescope-jobs-locks', 5)->block(60,function () use ($uuids) {
 
             $updates = [];
 
